@@ -155,8 +155,8 @@ library SM2Curve {
 			t1 = addmod(t1, t2, SM2_P);
 		}
 
-		emit Log("t0", t0);
-		emit Log("t1", t1);
+		//emit Log("t0", t0);
+		//emit Log("t1", t1);
 
 		return (t0 == t1);
 	}
@@ -170,7 +170,7 @@ library SM2Curve {
 		uint Y1 = P.Y;
 		uint Z1 = P.Z;
 
-		emit Log("X1", X1);
+		//emit Log("X1", X1);
 
 		uint T1;
 		uint T2;
@@ -201,7 +201,7 @@ library SM2Curve {
 	}
 
 	function isAtInfinity(SM2Point memory P) public returns (bool) {
-		emit Log("Z1", P.Z);
+		//emit Log("Z1", P.Z);
 		return (P.Z == 0);
 	}
 
@@ -220,7 +220,7 @@ library SM2Curve {
 		uint Y3;
 		uint Z3;
 
-		emit Log("Z1", P.Z);
+		//emit Log("Z1", P.Z);
 
 		if (isAtInfinity(Q)) {
 			return P;
@@ -262,13 +262,13 @@ library SM2Curve {
 	}
 
 	function scalarMul(uint k, SM2Point memory P) public returns (SM2Point memory) {
-		SM2Point memory Q = SM2Point(0, 0, 1);
+		SM2Point memory Q = SM2Point(1, 1, 0);
 
-		emit Log("k", k);
+		//emit Log("k", k);
 
 		for (uint i = 0; i < 256; i++) {
 			Q = dbl(Q);
-			if ((k & 8000000000000000000000000000000000000000000000000000000000000000) > 0) {
+			if ((k & 0x8000000000000000000000000000000000000000000000000000000000000000) > 0) {
 				Q = add(Q, P);
 			}
 			k <<= 1;
@@ -337,11 +337,21 @@ library SM2Curve {
 		// g = -(s + r)^-1 (mod n)
 		g = addmod(s, r, SM2_N);
 		g = invmod(g, SM2_N);
-		g = SM2_P - g;
+		g = SM2_N - g;
 
 		SM2Point memory P = scalarMulGenerator(s);
 		P = add(P, Q);
-		P = scalarMul(g, P);
+
+		x = P.X;
+		y = P.Y;
+		z = P.Z;
+		z = invmod(z, SM2_P);
+		y = mulmod(y, z, SM2_P);
+		z = mulmod(z, z, SM2_P);
+		x = mulmod(x, z, SM2_P);
+		y = mulmod(y, z, SM2_P);
+
+		P = scalarMul(g, SM2Point(x, y, 1));
 
 		// (x, y) = (X/Z^2, Y/Z^3)
 		x = P.X;
@@ -372,6 +382,7 @@ library SM2Curve {
 			s := mload(add(sig, 64))
 			v := add(mload(add(sig, 65)), 255)
 		}
+		
 		if (v < 27) {
 			v += 27;
 		}
@@ -383,9 +394,84 @@ library SM2Curve {
 		return sm2recover(hash, v, r, s);
 	}
 
-	function test() public returns (bool) {
+	function isEqual(SM2Point memory P, SM2Point memory Q) public returns (bool) {
+		return isAtInfinity(add(P, neg(Q)));
+	}
+
+	function genSig(uint256 x, uint256 y, uint8 v) public returns (bytes memory) {
+        bytes memory res = new bytes(65);
+        assembly {
+			mstore(add(res, 32), x)
+			mstore(add(res, 64), y)
+			mstore8(add(res, 96), v)
+		}
+		return res;
+    }
+
+	function genHash(uint256 x) public returns (bytes32) {
+		return bytes32(x);
+    }
+
+	function testField() public returns (bool) {
 		SM2Point memory G = SM2Point(SM2_X, SM2_Y, 1);
-		bool rv = isOnCurve(G);
-		return (rv);
+		assert(isOnCurve(G));
+		
+		uint r = 0x4aab6dac98f774bf8268269d5177dab84e5e82bb4323d768f7117cc3bf3b6189;
+		uint s = 0xe9b330ab81228432961ce806b4ab6898ddc512cc863836e068c627c1e97e91c2;
+		
+		uint r_sub_s = submod(r, s, SM2_P);
+		uint r_div2  = div2mod(r, SM2_P);
+		uint r_exp_s = expmod(r, s, SM2_P);
+		uint r_inv   = invmod(r, SM2_P);
+		uint r_invp  = invmodp(r);
+		assert(r_sub_s == 0x60f83d0017d4f08cec4b3e969ccc721f70996fedbceba0898e4b5501d5bccfc6);
+		assert(r_div2  == 0xa555b6d5cc7bba5fc134134ea8bbed5c272f415d2191ebb4fb88be61df9db0c4);
+		assert(r_exp_s == 0xc3aac2154d0a9c952cd53a7d52266833da40d18692f378f1cadfe00690b0b0bd);
+		assert(r_inv   == 0xee295df6b7c057c079ee6a7a9c8dfa8f84f4debed40fcf0d6aa4f38337bba10d);
+		assert(r_invp  == 0xee295df6b7c057c079ee6a7a9c8dfa8f84f4debed40fcf0d6aa4f38337bba10d);
+
+		return true;
+	}
+
+	function testPoint() public returns (bool) {
+		SM2Point memory R = SM2Point(0x8061401c4f5626681f94f46bb956b879535a1ce4c84053b9aa5f84665041a980, 0xf30ff6d94d44360d13863b9bac32a7c4eb4897144d09b6663a67fe2b4b68a4a0, 1);
+		SM2Point memory S = SM2Point(0x9619582757fd0fcea01cc42d654b90cc113e4d3527113ddc655278880de57c89, 0x8722774b08e5e0ccc4f959fcadf6bb57e32eb905404e510aa8d549babc7c0baa, 1);
+		assert(isOnCurve(R));
+		assert(isOnCurve(S));
+
+		uint k = 0xd3aae3f7ba923334977bb7b0af0029fe521af20db2127df12ff2d25be127a661;
+		SM2Point memory nR = scalarMul(SM2_N, R);
+		SM2Point memory negR = neg(R);
+		SM2Point memory dblR = dbl(R);
+		SM2Point memory R_add_S = add(R, S);
+		SM2Point memory R_sub_S = add(R, neg(S));
+		SM2Point memory kR = scalarMul(k, R);
+		SM2Point memory kG = scalarMulGenerator(k);
+		assert(isAtInfinity(nR));
+		assert(isEqual(negR, SM2Point(0x8061401c4f5626681f94f46bb956b879535a1ce4c84053b9aa5f84665041a980, 0xcf00925b2bbc9f2ec79c46453cd583b14b768eab2f6499ac59801d4b4975b5f, 1)));
+		assert(isEqual(dblR, SM2Point(0x223f44ae3762f2c3127c325fd0c613f84476e3f0824d2d0dc7dd2a7fb7af371f, 0xc968f53708f0a7e3618c7ef3a4c038f771e9516a2525d55edd87695d9017fc10, 1)));
+		assert(isEqual(R_add_S, SM2Point(0xd74c24475d39bbc3ddc454bb59ea1bddb0a1e38e418e5afd2e4ce5975780bf11, 0x3147de9be2fb1a27424af4d074e2d6e73402db6e071a10f5422f5567580e0795, 1)));
+		assert(isEqual(R_sub_S, SM2Point(0x5cd18bbc4a9cccb484df3870f216bd6757b92dd03f71f711033bc11619481df0, 0x10536bc6ed2044700b193edc32c5a54c6a534cffc4786c8d1f56474af3e59fb5, 1)));
+		assert(isEqual(kR, SM2Point(0xf0ef06241fa581922dc1fcdffa9e8468bbc530cd3bda0e2fd774a84f93bbd6e2, 0x2911d25c8a99ca5f9adab0eca566f2bfaa01f932b1bf59c02f1c5aa3e69d9755, 1)));
+		assert(isEqual(kG, SM2Point(0x3335cafb1a0205a320afdb354a76954bced810863739aaf49fbba5f1fa825634, 0x100e83c4af1082f11ad8823b2f1e8e98ac9f3c2f8b602190bc492675aef091b5, 1)));
+		
+		return true;
+	}
+
+	function testSign() public returns (bool) {
+		// bytes memory sig = genSig(0x7eaae95db44c417c1d3f0e24f911a029beae982e8f617bfefc69ca39e9866fd6, 0x2dc9efce73d232a549b2fdd1870eb4df7e62a8196cf2862749337627a3d4dfd7, 2);
+		// bytes32 hash = genHash(0x4b751e629a4a3bd8fc8f32efae9b0addefd687a85827d10a5cae2447ef0419a2);
+		// address res = sm2verify(hash, sig);
+		// emit Log("res", res);
+		return true;
+	}
+}
+
+contract sm2_test {
+	function test() public returns (bool) {
+		SM2Curve.testField();
+		SM2Curve.testPoint();
+		// SM2Curve.testSign();
+		return true;
 	}
 }
